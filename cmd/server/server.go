@@ -6,12 +6,18 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"log"
 	"net/http"
+	"time-tracker/cmd/api/handlers/user"
+	userRepo "time-tracker/internal/user/repositories/mysql/user"
+	"time-tracker/internal/user/services"
 )
 
 type ServerChi struct {
-	Addr     string
-	MySQLDSN string
-	DB       *sql.DB
+	Addr        string
+	MySQLDSN    string
+	DB          *sql.DB
+	UserRepo    userRepo.Repository
+	UserService services.Service
+	UserHandler user.Handler
 }
 
 func New(cfg ServerChi) *ServerChi {
@@ -24,14 +30,14 @@ func New(cfg ServerChi) *ServerChi {
 func (s *ServerChi) Run() {
 	db, err := s.initDB()
 	if err != nil {
-		log.Printf("Error initializing DB: %v", err)
+		log.Fatalf("Error initializing DB: %v", err)
 		return
 	}
 
 	defer db.Close()
 	s.DB = db
 
-	s.registerRouter()
+	s.registerRouter(db)
 }
 
 func (s *ServerChi) initDB() (*sql.DB, error) {
@@ -48,7 +54,7 @@ func (s *ServerChi) initDB() (*sql.DB, error) {
 	return db, nil
 }
 
-func (s *ServerChi) registerRouter() {
+func (s *ServerChi) registerRouter(db *sql.DB) {
 	// router
 	router := chi.NewRouter()
 
@@ -56,15 +62,24 @@ func (s *ServerChi) registerRouter() {
 		w.Write([]byte("pong"))
 	})
 
+	s.UserRepo = userRepo.Repository{
+		Db: db,
+	}
+	s.UserService = services.Service{
+		Repo: s.UserRepo,
+	}
+	s.UserHandler = user.Handler{
+		UserService: s.UserService,
+	}
 	router.Route("/users", func(rt chi.Router) {
-		//rt.Get("/")
+		rt.Post("/", s.UserHandler.CreateUser)
 	})
 
 	log.Printf("ServerChi running on port %s", s.Addr)
 
 	err := http.ListenAndServe(s.Addr, router)
 	if err != nil {
-		log.Printf("Error running server: %v", err)
+		log.Fatalf("Error running server: %v", err)
 		return
 	}
 
